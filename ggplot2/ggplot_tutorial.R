@@ -2,7 +2,7 @@
 ## ggplot tutorial
 ## Tom Smith 2020
 ## Fancy version here:
-## 
+## http://htmlpreview.github.io/?https://github.com/smithtp/TeachingResources/blob/master/ggplot2/ggplot_tutorial.html
 ##############################
 
 library("ggplot2")
