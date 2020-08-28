@@ -1,0 +1,336 @@
+---
+title: "Fancy graphics with ggplot"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+### Why ggplot2?
+
+You can certainly produce nice graphics with base R plotting, but getting it to look nice enough for publication quality can take some work. In contrast, advocates of ggplot2 would say that it allows you to produce publication quality graphics with much less effort. Additionally, the way plotting functions are written in ggplot allows you to very quickly and easily change between different representations of the same data, which may be more tricky with base R.
+
+Drawbacks?
+
+ * It can be very difficult to try to force ggplot to produce things that aren't directly supported.
+ * No support for 3D plotting at the moment.
+
+
+### The language of ggplot2
+
+ggplot2 tries to provide a grammar for plotting that is standardised across whatever data representations that you want to produce. All plots first start with a layer showing the data (which should be in the form of a dataframe). You then add other layers to modify the plot. Specifically, a graphic requires a "geometry" to specify the type of plot you want (points, lines, whatever - set using 'geom') and an "aesthetic" mapping from the data to produce plot objects (what you want x/y to be) and specify attributes (colours, shapes, etc). One of the handy things about ggplot2 is the layering mechanism by which additional data elements are added to a plot, as each layer can come from a different dataset and have a different aesthetic mapping
+
+
+### Basic plotting with ggplot2
+
+We'll start with using the iris dataset.
+
+```{r}
+library("ggplot2")
+data(iris)
+head(iris)
+```
+
+To start with, we need to point ggplot to the data
+
+```{r}
+ggplot(iris)
+```
+
+We haven't provided a geometry (the type of plot we want) or any aesthetics, so it's blank. The geometry is supplied by a geom layer, such as:
+
+ * geom_point()
+ * geom_line()
+ * geom_histogram()
+ * geom_boxplot()
+ 
+The aesthetic mapping is supplied by aes(), which can be specified in the base layer, and/or in subsequent geometry layers. These layers are concatenated together to form the plotting code, e.g.:
+
+
+```{r}
+p <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, col = Species)) +
+  geom_point()
+```
+
+From the iris data, that will plot sepal length against sepal width, coloured by species (as specified by the aesthetic mapping), as points (specified by the geometry layer).
+
+```{r}
+p
+```
+
+### Hang on, you said it would be pretty?!
+
+We can fix that and make it look nicer by concatenating some more layers onto our existing plot.
+
+Lets get rid of the grey background for starters.
+
+```{r}
+p <- p + theme_bw()
+p
+```
+
+Don't like the background grid either? That can all be removed with more theme arguments.
+
+```{r}
+p <- p + theme(panel.grid.major = element_blank(), 
+               panel.grid.minor = element_blank())
+p
+```
+
+Fix up the axis titles.
+
+```{r}
+p <- p + labs(x = "Sepal Length (cm)", y = "Sepal Width (cm)")
+p
+```
+
+Note the same could be achieved with *+ xlab("Sepal Length") + ylab("Sepal Width")*. 
+
+The default ggplot colours aren't colourblind friendly, so that's not great. We can change that using a "scale" layer, which comes in various forms of scale_XX_YY where XX is the scale you want to alter (colour, fill, shape?) and YY is how you want to change it. We called "col =" in our first plot layer, which is short for colour (or color if you're that way inclined), so XX is colour/color and as an example we'll just manually specify the colours, with "manual" in place of YY.
+
+
+```{r}
+p <- p + scale_colour_manual(values = c("red", "blue", "orange"))
+p
+```
+
+That was all a bit lengthy, but it could all be concatenated together in one plotting function, like so:
+
+```{r}
+ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, col = Species)) +
+  geom_point(size = 3, alpha = 0.5) +
+  scale_colour_manual(values = c("red", "blue", "orange")) +
+  labs(x = "Sepal Length (cm)", y = "Sepal Width (cm)") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(size = 18))
+
+```
+
+You'll note I also changed the point size and gave them some transparency in the geom_point() call, and changed the x-axis text size in the theme() call just for show. Looks like we have some points sitting ontop of each other and this wasn't a very good representation of the data.
+
+
+### Using a consistent theme across your plots?
+
+If you're making lots of plots that you want to look aesthetically similar, it can save some lines of code to just specify a theme once, and then call it for each plot.
+
+```{r}
+my_theme <- theme_bw() +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12))
+
+
+ggplot(iris, aes(x = Sepal.Length, fill = Species)) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 20) +
+  my_theme
+
+```
+
+
+### Plotting multiple layers
+
+Boxplot with overlaid points, using much the same code as we had before.
+
+```{r}
+ggplot(iris, aes(x = Species, y = Sepal.Length, fill = Species)) +
+  geom_boxplot(alpha = 0.5) +
+  geom_point(alpha = 0.5) +
+  scale_fill_manual(values = c("red", "blue", "orange")) +
+  labs(y = "Sepal Length (cm)") +
+  my_theme  +
+  theme(legend.position = "none")
+```
+
+There are some problems here. It didn't colour our points - because we used fill, not colour and this point shape needs colour (or we could choose a new point shape that takes a fill call instead). We should add some jitter to the plot so that we can see points with the same sepal length next to each other. We also need to remove the automatic outlier points that geom_boxplot puts in, else we'll see those twice.
+
+```{r}
+ggplot(iris, aes(x = Species, y = Sepal.Length, fill = Species)) +
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) +
+  geom_point(alpha = 0.5, shape = 21, size = 3, position = position_jitterdodge()) +
+  scale_fill_manual(values = c("red", "blue", "orange")) +
+  labs(y = "Sepal Length (cm)") +
+  my_theme  +
+  theme(legend.position = "none")
+```
+
+
+### Layering from different datasets
+
+I said earlier that one of the nice things about ggplot is adding different layers from different datasets. Here's a quick example.
+
+```{r}
+
+data_1 <- data.frame(seq(1, 20, 1), rnorm(20, mean = 10, sd = 2))
+data_2 <- data.frame(seq(1, 20, 1), seq(1, 20, 1) + runif(20, -1, 1))
+
+names(data_1) <- c("Var1", "Var2")
+names(data_2) <- c("newVar1", "newVar2")
+
+ggplot() +
+  geom_point(data = data_1, aes(x = Var1, y = Var2)) +
+  geom_line(data = data_2, aes(x = newVar1, y = newVar2))
+
+```
+
+
+### Saving plots
+
+As an alternative to wrapping the plotting function inside a call to svg/png/whatever, you can instead use ggsave.
+
+```{r}
+# Instead of this
+# svg("my_boxplot.svg")
+# ggplot(iris, aes(x = Species, y = Sepal.Length)) +
+#   geom_boxplot(alpha = 0.5, aes(fill = Species), outlier.shape = NA) +
+#   geom_point(aes(fill = Species), alpha = 0.5, shape = 21, size = 3, position = position_jitterdodge()) +
+#   scale_fill_manual(values = c("red", "blue", "orange")) +
+#   labs(y = "Sepal Length (cm)") +
+#   theme_bw()  +
+#   theme(legend.position = "none")
+# dev.off()
+#
+# You can do this:
+
+p <- ggplot(iris, aes(x = Species, y = Sepal.Length)) +
+  geom_boxplot(alpha = 0.5, aes(fill = Species), outlier.shape = NA) +
+  geom_point(aes(fill = Species), alpha = 0.5, shape = 21, size = 3, position = position_jitterdodge()) +
+  scale_fill_manual(values = c("red", "blue", "orange")) +
+  labs(y = "Sepal Length (cm)") +
+  theme_bw()  +
+  theme(legend.position = "none")
+
+ggsave("my_boxplot.svg", p)
+
+```
+
+
+### More complex things for an idea of what's possible
+
+```{r}
+ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
+  geom_point(size = 3, alpha = 0.5) +
+  geom_smooth(method = lm, se = FALSE) +
+  labs(x = "Sepal Length (cm)", y = "Sepal Width (cm)") +
+  my_theme +
+  facet_wrap(~Species)
+```
+
+```{r}
+data(faithful)
+
+ggplot(faithful, aes(x=eruptions, y=waiting)) +
+  geom_point() + 
+  geom_density_2d() +
+  labs(x = expression(paste("This axis label has fancy characters ", alpha, degree, Beta^2, Sigma[E]))) +
+  my_theme +
+  annotate("text", x = 2, y = 90, label = "some words are here") +
+  annotate("text", x = 4, y = 50, label = "some more words are here and they're red", col = "red")
+```
+
+```{r}
+library("reshape2")
+GenerateMatrix <- function(N){
+    M <- matrix(runif(N * N), N, N)
+    return(M)
+}
+
+M <- GenerateMatrix(10)
+Melt <- melt(M)
+
+p <- ggplot(Melt, aes(Var1, Var2, fill = value)) + 
+  geom_tile(colour = "black") + 
+  scale_fill_gradientn(colours = rainbow(10)) +
+  theme(aspect.ratio = 1,
+        legend.position = "none", 
+        panel.background = element_blank(),
+        axis.ticks = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank())
+p
+```
+
+This will take a few seconds to run:
+
+```{r}
+iter <- 10000
+p <- runif(iter)
+coord <- matrix(c(0, 0), ncol = 1)
+df <- rbind(data.frame(), t(coord))
+for (i in 1:iter) {
+  if (p[i] <= 0.05) {
+    m <- matrix(c(0, 0, 0, 0.16), nrow = 2, ncol = 2)
+    const <- matrix(c(0, 0), ncol = 1)
+  } else if (p[i] > 0.05 && p[i] <= 0.86) {
+    m <- matrix(c(0.85, -0.04, 0.04, 0.85), nrow = 2, ncol = 2)
+    const <- matrix(c(0, 1.6), ncol = 1)
+  } else if (p[i] > 0.86 && p[i] <= 0.93) {
+    m <- matrix(c(0.2, 0.23, -0.26, 0.22), nrow = 2, ncol = 2)
+    const <- matrix(c(0, 1.6), ncol = 1)
+    
+  } else {
+    m <- matrix(c(-0.15, 0.26, 0.28, 0.24), nrow = 2, ncol = 2)
+    const <- matrix(c(0, 0.44), ncol = 1)
+  }
+  coord <- m %*% coord + const
+  df <- rbind(df, t(coord))
+}
+
+
+ggplot(df, aes(x = V1, y = V2, col = V2)) + 
+  geom_point() +
+  scale_colour_gradient2(low = "green", mid = "orange", high = "yellow", midpoint = 7) +
+  theme(aspect.ratio = 1,
+        legend.position = "none", 
+        panel.background = element_blank(),
+        axis.ticks = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank())
+```
+
+
+### Some other geom examples
+
+Density plot
+
+```{r}
+ggplot(iris, aes(x = Sepal.Length, col = Species)) +
+  geom_density() +
+  scale_colour_manual(values = c("red", "blue", "orange")) +
+  labs(x = "Sepal Length (cm)") +
+  theme_bw() 
+
+```
+
+Filled density plot
+
+```{r}
+ggplot(iris, aes(x = Sepal.Length, fill = Species)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("red", "blue", "orange")) +
+  labs(x = "Sepal Length (cm)") +
+  theme_bw() +
+  theme(legend.position = c(0.8, 0.8))
+
+```
+
+Violin plot
+
+```{r}
+ggplot(iris, aes(x = Species, y = Sepal.Length, fill = Species)) +
+  geom_violin(alpha = 0.5) +
+  scale_fill_manual(values = c("red", "blue", "orange")) +
+  labs(y = "Sepal Length (cm)") +
+  theme_bw()  +
+  theme(legend.position = "none")
+```
