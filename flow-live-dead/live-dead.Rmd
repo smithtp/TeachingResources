@@ -1,0 +1,186 @@
+---
+title: "flow-live-dead"
+author: "Tom Smith"
+date: '2022-03-15'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Flow Cytometry Live/Dead Staining
+
+## Experiment:
+
+-   Two bacteria: E. coli and isolate #487 (Aeromonas popoffii)
+-   growing and stationary populations (2-day and 2-week cultures), stationary pops should have proportionally more dead cells
+-   Measured at two different dilutions (1:100 and 1:1000), replicated 3 times each
+-   Fast fluidics settings, 20ul measured, stained with thiazole orange (TO) and propidium iodide (PI), media is unfiltered, so expect lots of background noise
+-   The lipopolysaccharide layer in gram negative cells (which these bacteria both are) can slow down the uptake of TO, so cells were left a good 10 minutes in the dark to allow extra time for the TO to penetrate cells.
+
+## Questions
+
+-   How consistent are replicates?
+-   Do we return 10x more cells from 1:100 dilution?
+-   Are there proportionally more dead cells in stationary populations?
+
+Need to use some packages to read flow cytometry files in R:
+
+```{r packages, message = FALSE, warning = FALSE}
+# first load some packages
+library(flowCore) # flow cytometry file reading and manipulation
+library(ggcyto) # flow cytometry visualisation
+library(flowViz) # alternative visualisation!
+library(flowStats) # cunning flow data functions
+library(tidyr)
+library(dplyr)
+```
+
+Our flow cytometer exports a single file for each well, with flowCore we can load them all at once:
+
+```{r}
+# read all the files together
+fs <- read.flowSet(path = "data/")
+
+# log-transform the values
+tf <- transformList(from=colnames(fs)[1:12], tfun=asinh)
+fs_log <- tf %on% fs
+```
+
+## Visualise
+
+We'll just pick a couple of wells to visualise so the graphs are large enough to see, rather than plotting everything. Wells A6 and A8 are 1:100 dilutions of stationary phase E. coli and A. popoffii respectively.
+
+### Complex particles
+
+Side scatter (SSC) vs forward scatter (FSC). FSC = particle size; SSC = particle complexity. Large, complex things are likely cells.
+
+```{r, warning=FALSE}
+xyplot(`SSC-H` ~ `FSC-H`, data=fs_log[c(6,8)])
+```
+
+### Stained cells
+
+FL2 vs FSC. FL2 is a fluorescent channel, cells stained with TO fluoresce.
+
+```{r, warning=FALSE}
+xyplot(`FL2-A` ~ `FSC-H`, data=fs_log[c(6,8)])
+```
+
+The two bacteria have quite different profiles, the A. popoffii in A08 look to have generally higher fluoresence than the E. coli in A06 (maybe the cells are bigger).
+
+### Live vs dead cells
+
+Here we use two fluouresence channels, TO fluoresce on FL2, PI on FL3. TO stained things are alive, PI stained = dead. Somewhere in the middle are "injured" cells. I'll put the negative well (A1) on here too for comparison.
+
+```{r, warning=FALSE}
+xyplot(`FL2-A` ~ `FL3-A`, data=fs_log[c(1,6,8)])
+```
+
+Lots of alive cells, but potentially some dead ones too. Lets compare the plots from the growing and stationary B. soli populations - expect more dead in the stationary (A8) vs the growing (A4).
+
+```{r, warning=FALSE}
+xyplot(`FL2-A` ~ `FL3-A`, data=fs_log[c(4,8)])
+```
+
+Visually it looks like there might be slightly more dead things in the stationary phase population.
+
+## Gating
+
+Gating allows us to select the cells we're interested in based on the different channels of the flow cytometer. First, for simply counting cells we should gate based on the FSC/FL2 plot.
+
+```{r, warning=FALSE}
+gate.fl2 <- polygonGate("FSC-H" = c(16, 10, 10, 12, 17), 
+                        "FL2-A" = c(17, 11, 7, 7, 14))
+
+xyplot(`FL2-A` ~ `FSC-H`, data=fs_log[c(1,6,8)], filter = gate.fl2)
+```
+
+Here we're removing all the background particles which can be seen in the negative well (A1) and keeping only the cells (high FSC and fluoresence). We can get the cell counts within the gate using the `filter` command.
+
+```{r, warning=FALSE}
+filtered.data.fl2 <- flowCore::filter(fs_log, gate.fl2)
+
+cell.counts.fl2 <- lapply(filtered.data.fl2, function(x) summary(x)$true)
+
+results.df <- data.frame(cell.counts.fl2) %>% pivot_longer(cols = 1:25, names_to = "Well", values_to = "Count")
+head(results.df)
+```
+
+Repeat this gating but on the live/dead axes to count both types of cell and add to the dataframe:
+
+### Live cells:
+
+```{r, warning=FALSE}
+gate.live <- polygonGate("FL3-A" = c(1, 8.5, 11, 15), 
+                        "FL2-A" = c(7, 7, 9, 15))
+
+xyplot(`FL2-A` ~ `FL3-A`, data=fs_log[c(1, 6, 8)], filter = gate.live)
+```
+
+### Dead cells:
+
+```{r, warning=FALSE}
+gate.dead <- polygonGate("FL3-A" = c(8.5, 8.5, 11, 15, 15), 
+                         "FL2-A" = c(4, 7, 9, 9, 4))
+
+xyplot(`FL2-A` ~ `FL3-A`, data=fs_log[c(1, 6, 8)], filter = gate.dead)
+```
+
+
+Then add the live and dead cell counts data to the dataframe:
+
+```{r}
+# get the cell counts and add to our dataframe
+filtered.data.live <- flowCore::filter(fs_log, gate.live)
+cell.counts.live <- lapply(filtered.data.live, function(x) summary(x)$true)
+live.df <- data.frame(cell.counts.live) %>%
+  pivot_longer(cols = 1:25, names_to = "Well", values_to = "Count.live")
+
+# join with previous data
+results.df$Count.live <- live.df$Count.live
+
+filtered.data.dead <- flowCore::filter(fs_log, gate.dead)
+cell.counts.dead <- lapply(filtered.data.dead, function(x) summary(x)$true)
+dead.df <- data.frame(cell.counts.dead) %>%
+  pivot_longer(cols = 1:25, names_to = "Well", values_to = "Count.dead")
+
+# join with previous data
+results.df$Count.dead <- dead.df$Count.dead
+```
+
+## Analysis
+
+Assess how consistent the cells counts across replicates and dilutions are.
+
+```{r}
+# add extra meta-data to the results frame
+results.df <- results.df %>%
+  mutate(dilution =  c(NA, rep(c(100, 1000), 12)),
+         phase = c(NA, rep(c("growth", "stationary"), each = 4, times =  3)),
+         strain = c("negative", rep(c("E. coli", "A. popoffii"), each = 2, times = 6)),
+         cells.per.ml = Count*dilution*50,
+         live.proportion = Count.live/(Count.dead+Count.live))
+
+
+### ------ do some plotting ------ ###
+
+plotting.data <- results.df[results.df$strain != "negative",]
+
+## how consistent are replicates and dilutions?
+ggplot(plotting.data, aes(x = as.factor(dilution), y = cells.per.ml, col = strain)) +
+  geom_point() +
+  facet_wrap(~phase)
+```
+
+Replication looks decent, cell counts from the 1:100 and 1:1000 dilutions are of the same order of magnitude. Only issue is that the growth phase E. coli have too few cells at this dilution to be counted accurately - nevermind.
+
+What about the live vs dead cell proportions in the growing vs stationary populations? We can't test this for the E. coli because the low absolute cell counts in the growth phase make those results too unreliable.
+
+```{r}
+ggplot(plotting.data[plotting.data$strain == "A. popoffii",], aes(x = as.factor(phase), y = live.proportion, col = dilution)) +
+  geom_point() 
+```
+
+There does indeed seem to be more dead cells in the stationary phase as expected, but the proportions aren't consistent between the different diutions. That suggests my gating may be off, i.e. we're picking up debris rather than cells? The true test of this would be to kill some bacteria (e.g. heat-treat, or with ethanol/isopropanol) then live/dead stain to test properly.
